@@ -7,18 +7,22 @@
 #include <vector>
 #include <cmath>
 #include <limits>
+#include <algorithm>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
 #include <opencv2/xfeatures2d/nonfree.hpp>
+//#include <matplotlibcpp.h>
 
 #include "dataStructures.h"
 #include "matching2D.hpp"
 #include "objectDetection2D.hpp"
 #include "lidarData.hpp"
 #include "camFusion.hpp"
+#include "pbPlots.hpp"
+#include "supportLib.hpp"
 
 using namespace std;
 
@@ -26,6 +30,11 @@ using namespace std;
 int main(int argc, const char *argv[])
 {
     /* INIT VARIABLES AND DATA STRUCTURES */
+    vector<double> ttclidar_v;
+    vector<double> ttccamera_v;
+    vector<double> imageIdx_v;
+    string detectorType = "FAST"; // SHITOMASI,HARRIS,FAST,SIFT,BRISK,ORB,AKAZE
+    string descriptorType = "FREAK"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
 
     // data location
     string dataPath = "../";
@@ -81,6 +90,7 @@ int main(int argc, const char *argv[])
         /* LOAD IMAGE INTO BUFFER */
 
         // assemble filenames for current index
+        cout<<"imIndex="<<imgIndex<<endl;
         ostringstream imgNumber;
         imgNumber << setfill('0') << setw(imgFillWidth) << imgStartIndex + imgIndex;
         string imgFullFilename = imgBasePath + imgPrefix + imgNumber.str() + imgFileType;
@@ -129,7 +139,7 @@ int main(int argc, const char *argv[])
         clusterLidarWithROI((dataBuffer.end()-1)->boundingBoxes, (dataBuffer.end() - 1)->lidarPoints, shrinkFactor, P_rect_00, R_rect_00, RT);
 
         // Visualize 3D objects
-        bVis = true;
+        bVis =false;
         if(bVis)
         {
             show3DObjects((dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(2000, 2000), true);
@@ -150,7 +160,7 @@ int main(int argc, const char *argv[])
 
         // extract 2D keypoints from current image
         vector<cv::KeyPoint> keypoints; // create empty feature list for current image
-        string detectorType = "SHITOMASI";
+        //string detectorType = "SHITOMASI";
 
         if (detectorType.compare("SHITOMASI") == 0)
         {
@@ -159,6 +169,13 @@ int main(int argc, const char *argv[])
         else
         {
             //...
+
+            if(detectorType.compare("HARRIS")==0){
+                detKeypointsHarris(keypoints, imgGray, false);
+            }
+            else{
+                detKeypointsModern(keypoints, imgGray, detectorType, false);
+            }
         }
 
         // optional : limit number of keypoints (helpful for debugging and learning)
@@ -184,7 +201,7 @@ int main(int argc, const char *argv[])
         /* EXTRACT KEYPOINT DESCRIPTORS */
 
         cv::Mat descriptors;
-        string descriptorType = "BRISK"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
+        //string descriptorType = "BRISK"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
         descKeypoints((dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->cameraImg, descriptors, descriptorType);
 
         // push descriptors for current frame to end of data buffer
@@ -200,12 +217,12 @@ int main(int argc, const char *argv[])
 
             vector<cv::DMatch> matches;
             string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
-            string descriptorType = "DES_BINARY"; // DES_BINARY, DES_HOG
+            string descriptorType_BINARY_HOG = "DES_BINARY"; // DES_BINARY, DES_HOG
             string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN
 
             matchDescriptors((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints,
                              (dataBuffer.end() - 2)->descriptors, (dataBuffer.end() - 1)->descriptors,
-                             matches, descriptorType, matcherType, selectorType);
+                             matches, descriptorType_BINARY_HOG, matcherType, selectorType);
 
             // store matches in current data frame
             (dataBuffer.end() - 1)->kptMatches = matches;
@@ -257,6 +274,8 @@ int main(int argc, const char *argv[])
                     //// TASK FP.2 -> compute time-to-collision based on Lidar data (implement -> computeTTCLidar)
                     double ttcLidar; 
                     computeTTCLidar(prevBB->lidarPoints, currBB->lidarPoints, sensorFrameRate, ttcLidar);
+                    cout<<"ttcLidar="<<ttcLidar<<endl;
+                    ttclidar_v.push_back(ttcLidar);
                     //// EOF STUDENT ASSIGNMENT
 
                     //// STUDENT ASSIGNMENT
@@ -265,6 +284,9 @@ int main(int argc, const char *argv[])
                     double ttcCamera;
                     clusterKptMatchesWithROI(*currBB, (dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->kptMatches);                    
                     computeTTCCamera((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, currBB->kptMatches, sensorFrameRate, ttcCamera);
+                    cout<<"TTCCamera="<<ttcCamera<<endl;
+                    ttccamera_v.push_back(ttcCamera);
+                    imageIdx_v.push_back(imgIndex*1.0);
                     //// EOF STUDENT ASSIGNMENT
 
                     bVis = true;
@@ -292,6 +314,71 @@ int main(int argc, const char *argv[])
         }
 
     } // eof loop over all images
+
+    /*vector<int> frame(ttccamera_v.size());
+    std::iota(frame.begin(),frame.end(),0);
+
+    matplotlibcpp::plot(x,y);
+    plot::save("test.png");*/
+
+    string plot_name="detector:"+detectorType+",descriptor:"+descriptorType;
+    StringReference *errorMessage=new StringReference();
+    RGBABitmapImageReference *imageRef=CreateRGBABitmapImageReference();
+    ScatterPlotSeries *series=GetDefaultScatterPlotSeriesSettings();
+    series->xs=&imageIdx_v;
+    series->ys=&ttccamera_v;
+
+    ScatterPlotSettings *settings=GetDefaultScatterPlotSettings();
+    settings->width=600;
+    settings->height=400;
+    settings->autoBoundaries=true;
+    //settings->title=toVector(L"Test");
+    //wstring plot_name_wchar_t (plot_name.begin(),plot_name.end());
+    settings->title=toVector(L"");
+    settings->xLabel=toVector(L"image index");
+    settings->yLabel=toVector(L"TTC Camera");
+    settings->scatterPlotSeries->push_back(series);
+
+    bool success=DrawScatterPlotFromSettings(imageRef,settings,errorMessage);
+    if(success){
+    vector<double> *pngData=ConvertToPNG(imageRef->image);
+    WriteToFile(pngData,plot_name+".png");
+    DeleteImage(imageRef->image);
+    /*
+    delete [] errorMessage;
+    delete [] imageRef;
+    delete [] series;
+    delete [] settings;
+    delete [] pngData;*/
+    }
+     
+    /*
+    string lidar_plot_name="TTC_Lidar";
+    StringReference *errorMessage1=new StringReference();
+    RGBABitmapImageReference *imageRef1=CreateRGBABitmapImageReference();
+    ScatterPlotSeries *series1=GetDefaultScatterPlotSeriesSettings();
+    series1->xs=&imageIdx_v;
+    series1->ys=&ttclidar_v;
+
+    ScatterPlotSettings *settings1=GetDefaultScatterPlotSettings();
+    settings1->width=600;
+    settings1->height=400;
+    settings1->autoBoundaries=true;
+    //settings->title=toVector(L"Test");
+    //wstring plot_name_wchar_t (plot_name.begin(),plot_name.end());
+    settings1->title=toVector(L"");
+    settings1->xLabel=toVector(L"image index");
+    settings1->yLabel=toVector(L"TTC Lidar");
+    settings1->scatterPlotSeries->push_back(series);
+
+    bool success1=DrawScatterPlotFromSettings(imageRef1,settings1,errorMessage1);
+    if(success1){
+    vector<double> *pngData1=ConvertToPNG(imageRef1->image);
+    WriteToFile(pngData1,lidar_plot_name+".png");
+    DeleteImage(imageRef1->image);
+    }
+    //DrawScatterPlot(imageRef,600,400,&imageIdx_v,&ttccamera_v,errorMessage);
+    */
 
     return 0;
 }

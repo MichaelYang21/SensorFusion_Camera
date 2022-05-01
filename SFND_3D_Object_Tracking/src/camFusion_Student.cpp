@@ -9,6 +9,7 @@
 #include "dataStructures.h"
 
 using namespace std;
+using namespace cv;
 
 
 // Create groups of Lidar points whose projection into the camera falls into the same bounding box
@@ -139,6 +140,37 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
 {
     // ...
+    int kptCurrIdx,kptPrevIdx;
+    vector<cv::DMatch> MatchesBBox;
+    vector<double> distance;
+    for(auto it=kptMatches.begin();it!=kptMatches.end();++it){
+        kptCurrIdx=(*it).trainIdx;
+        kptPrevIdx=(*it).queryIdx;
+        if(boundingBox.roi.contains(kptsCurr[kptCurrIdx].pt)){
+            MatchesBBox.push_back((*it));
+            distance.push_back(cv::norm(kptsCurr[kptCurrIdx].pt-kptsPrev[kptPrevIdx].pt));
+        }
+    }
+
+    cout<<"size of keypoints in ROI "<<MatchesBBox.size()<<endl;
+
+    double distance_mean=0;
+    for(auto it=distance.begin();it!=distance.end();++it){
+        distance_mean+=*it;
+    }
+    distance_mean=distance_mean/distance.size();
+
+    double distance_threshold=0.8*distance_mean;
+    for(int i=0;i<distance.size();i++){
+        if(distance[i]<distance_threshold){
+            boundingBox.kptMatches.push_back(MatchesBBox[i]);
+            boundingBox.keypoints.push_back(kptsCurr[MatchesBBox[i].trainIdx]);
+        }
+    }
+
+    cout<<"size of keypoints in ROI "<<boundingBox.kptMatches.size()<<" after outliers are removed"<<endl;
+
+
 }
 
 
@@ -147,6 +179,41 @@ void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPo
                       std::vector<cv::DMatch> kptMatches, double frameRate, double &TTC, cv::Mat *visImg)
 {
     // ...
+    cout<<"assemble vectors of distRatios"<<endl;
+    vector<double> distRatios;
+    for(auto it1=kptMatches.begin();it1!=kptMatches.end()-1;++it1){
+        KeyPoint kpOuterCurr=kptsCurr.at(it1->trainIdx);
+        KeyPoint kpOuterPrev=kptsPrev.at(it1->queryIdx);
+
+        for(auto it2=kptMatches.begin()+1;it2!=kptMatches.end();++it2){
+
+            double minDist=100.0;
+
+            KeyPoint kpInnerCurr=kptsCurr.at(it2->trainIdx);
+            KeyPoint kpInnerPrev=kptsPrev.at(it2->queryIdx);
+
+            double distCurr=cv::norm(kpOuterCurr.pt-kpInnerCurr.pt);
+            double distPrev=cv::norm(kpOuterPrev.pt-kpInnerPrev.pt);
+
+            if(distPrev> std::numeric_limits<double>::epsilon() && distCurr>=minDist){
+                double distRatio=distCurr/distPrev;
+                distRatios.push_back(distRatio);
+        }
+        
+    }
+    }
+
+    if(distRatios.size()==0)
+    { TTC=NAN;
+       return;
+    }
+    cout<<"calculating median values of distance ratio"<<endl;
+    sort(distRatios.begin(),distRatios.end());
+    long medIndex=floor(distRatios.size()/2.0);
+    double medDistRatio=distRatios.size()%2==0?(distRatios[medIndex-1]+distRatios[medIndex])/2.0:distRatios[medIndex];
+
+    double dT=1/frameRate;
+    TTC=-dT/(1-medDistRatio);
 }
 
 
@@ -154,10 +221,75 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
                      std::vector<LidarPoint> &lidarPointsCurr, double frameRate, double &TTC)
 {
     // ...
+    double dT=1.0/frameRate;
+    double laneWidth=4.0;
+
+    double minXPrev=1e9, minXCurr=1e9;
+    for(auto it=lidarPointsPrev.begin();it!=lidarPointsPrev.end();++it){
+        if(abs(it->y)<=laneWidth/2.0){
+            minXPrev=minXPrev>it->x?it->x:minXPrev;
+        }
+    }
+
+    for(auto it=lidarPointsCurr.begin();it!=lidarPointsCurr.end();++it){
+        if(abs(it->y)<=laneWidth/2.0){
+            minXCurr=minXCurr>it->x?it->x:minXCurr;
+        }
+    }
+    TTC=minXCurr*dT/(minXPrev-minXCurr);
 }
 
 
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches, std::map<int, int> &bbBestMatches, DataFrame &prevFrame, DataFrame &currFrame)
 {
     // ...
+    int prev_kpt_idx,curr_kpt_idx;
+    int prev_BBox_size=prevFrame.boundingBoxes.size();
+    int curr_BBox_size=currFrame.boundingBoxes.size();
+    int counts[prev_BBox_size][curr_BBox_size]={};
+
+    vector<int> prev_BBox_Ids,curr_BBox_Ids;
+    cv::KeyPoint prev_kpt,curr_kpt;
+
+    for(auto it=matches.begin();it!=matches.end();++it){
+       prev_kpt_idx=(*it).queryIdx;
+       curr_kpt_idx=(*it).trainIdx;
+       prev_kpt=prevFrame.keypoints[prev_kpt_idx];
+       curr_kpt=currFrame.keypoints[curr_kpt_idx];
+
+       prev_BBox_Ids.clear();
+       curr_BBox_Ids.clear();
+
+       for(auto it2=prevFrame.boundingBoxes.begin();it2!=prevFrame.boundingBoxes.end();++it2){
+           if((*it2).roi.contains(prev_kpt.pt)){
+               prev_BBox_Ids.push_back((*it2).boxID);}
+       }
+
+        for(auto it3=currFrame.boundingBoxes.begin();it3!=currFrame.boundingBoxes.end();++it3){
+                if((*it3).roi.contains(curr_kpt.pt)){
+                    curr_BBox_Ids.push_back((*it3).boxID);}
+            }
+        
+        for(auto prevId:prev_BBox_Ids){
+            for(auto currId:curr_BBox_Ids){
+                counts[prevId][currId]++;
+            }
+        }
+    }
+
+    int Count_Max=0;
+    int Id_max;
+
+    for(int prevId=0;prevId<prev_BBox_size;prevId++){
+        Count_Max=0;
+        for(int currId=0;currId<curr_BBox_size;currId++){
+            if(counts[prevId][currId]>Count_Max){
+                Count_Max=counts[prevId][currId];
+                Id_max=currId;
+            }
+        }
+        bbBestMatches[prevId]=Id_max;
+    }
+
+
 }
