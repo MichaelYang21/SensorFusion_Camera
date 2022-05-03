@@ -81,7 +81,7 @@ int main(int argc, const char *argv[])
     double sensorFrameRate = 10.0 / imgStepWidth; // frames per second for Lidar and camera
     int dataBufferSize = 2;       // no. of images which are held in memory (ring buffer) at the same time
     vector<DataFrame> dataBuffer; // list of data frames which are held in memory at the same time
-    bool bVis = false;            // visualize results
+    bool bVis = true;            // visualize results
 
     /* MAIN LOOP OVER ALL IMAGES */
 
@@ -139,10 +139,10 @@ int main(int argc, const char *argv[])
         clusterLidarWithROI((dataBuffer.end()-1)->boundingBoxes, (dataBuffer.end() - 1)->lidarPoints, shrinkFactor, P_rect_00, R_rect_00, RT);
 
         // Visualize 3D objects
-        bVis =false;
+        bVis =true;
         if(bVis)
         {
-            show3DObjects((dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(2000, 2000), true);
+            show3DObjects(imgIndex, (dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(2000, 2000), true);
         }
         bVis = false;
 
@@ -321,38 +321,43 @@ int main(int argc, const char *argv[])
     matplotlibcpp::plot(x,y);
     plot::save("test.png");*/
 
-    string plot_name="detector:"+detectorType+",descriptor:"+descriptorType;
-    StringReference *errorMessage=new StringReference();
-    RGBABitmapImageReference *imageRef=CreateRGBABitmapImageReference();
-    ScatterPlotSeries *series=GetDefaultScatterPlotSeriesSettings();
-    series->xs=&imageIdx_v;
-    series->ys=&ttccamera_v;
+    bool TTC_Camera_Plotting=false;
 
-    ScatterPlotSettings *settings=GetDefaultScatterPlotSettings();
-    settings->width=600;
-    settings->height=400;
-    settings->autoBoundaries=true;
-    //settings->title=toVector(L"Test");
-    //wstring plot_name_wchar_t (plot_name.begin(),plot_name.end());
-    settings->title=toVector(L"");
-    settings->xLabel=toVector(L"image index");
-    settings->yLabel=toVector(L"TTC Camera");
-    settings->scatterPlotSeries->push_back(series);
+    if(TTC_Camera_Plotting){
+        string plot_name="detector:"+detectorType+",descriptor:"+descriptorType;
+        StringReference *errorMessage=new StringReference();
+        RGBABitmapImageReference *imageRef=CreateRGBABitmapImageReference();
+        ScatterPlotSeries *series=GetDefaultScatterPlotSeriesSettings();
+        series->xs=&imageIdx_v;
+        series->ys=&ttccamera_v;
 
-    bool success=DrawScatterPlotFromSettings(imageRef,settings,errorMessage);
-    if(success){
-    vector<double> *pngData=ConvertToPNG(imageRef->image);
-    WriteToFile(pngData,plot_name+".png");
-    DeleteImage(imageRef->image);
-    /*
-    delete [] errorMessage;
-    delete [] imageRef;
-    delete [] series;
-    delete [] settings;
-    delete [] pngData;*/
+        ScatterPlotSettings *settings=GetDefaultScatterPlotSettings();
+        settings->width=600;
+        settings->height=400;
+        settings->autoBoundaries=true;
+        //settings->title=toVector(L"Test");
+        //wstring plot_name_wchar_t (plot_name.begin(),plot_name.end());
+        settings->title=toVector(L"");
+        settings->xLabel=toVector(L"image index");
+        settings->yLabel=toVector(L"TTC Camera");
+        settings->scatterPlotSeries->push_back(series);
+
+        bool success=DrawScatterPlotFromSettings(imageRef,settings,errorMessage);
+        if(success){
+        vector<double> *pngData=ConvertToPNG(imageRef->image);
+        WriteToFile(pngData,plot_name+".png");
+        DeleteImage(imageRef->image);
+        /*
+        delete [] errorMessage;
+        delete [] imageRef;
+        delete [] series;
+        delete [] settings;
+        delete [] pngData;*/
+        }
     }
-     
-    /*
+
+    bool TTC_Lidar_Plotting=true;
+    if(TTC_Lidar_Plotting){
     string lidar_plot_name="TTC_Lidar";
     StringReference *errorMessage1=new StringReference();
     RGBABitmapImageReference *imageRef1=CreateRGBABitmapImageReference();
@@ -369,7 +374,7 @@ int main(int argc, const char *argv[])
     settings1->title=toVector(L"");
     settings1->xLabel=toVector(L"image index");
     settings1->yLabel=toVector(L"TTC Lidar");
-    settings1->scatterPlotSeries->push_back(series);
+    settings1->scatterPlotSeries->push_back(series1);
 
     bool success1=DrawScatterPlotFromSettings(imageRef1,settings1,errorMessage1);
     if(success1){
@@ -378,7 +383,7 @@ int main(int argc, const char *argv[])
     DeleteImage(imageRef1->image);
     }
     //DrawScatterPlot(imageRef,600,400,&imageIdx_v,&ttccamera_v,errorMessage);
-    */
+    }
 
     return 0;
 }

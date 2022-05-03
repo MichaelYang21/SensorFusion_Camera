@@ -4,6 +4,8 @@
 #include <numeric>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "camFusion.hpp"
 #include "dataStructures.h"
@@ -67,7 +69,7 @@ void clusterLidarWithROI(std::vector<BoundingBox> &boundingBoxes, std::vector<Li
 * However, you can make this function work for other sizes too.
 * For instance, to use a 1000x1000 size, adjusting the text positions by dividing them by 2.
 */
-void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, cv::Size imageSize, bool bWait)
+void show3DObjects(int imgIndex,std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, cv::Size imageSize, bool bWait)
 {
     // create topview image
     cv::Mat topviewImg(imageSize, CV_8UC3, cv::Scalar(255, 255, 255));
@@ -128,6 +130,11 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
     string windowName = "3D Objects";
     cv::namedWindow(windowName, 1);
     cv::imshow(windowName, topviewImg);
+    //char *intStr=itoa(imgIndex);
+    //string str=string(intStr);
+    stringstream ss;
+    ss<<imgIndex;
+    cv::imwrite("image"+ss.str()+".png",topviewImg);
 
     if(bWait)
     {
@@ -225,18 +232,31 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
     double laneWidth=4.0;
 
     double minXPrev=1e9, minXCurr=1e9;
+    vector<double> xPrevROI,xCurrROI;
     for(auto it=lidarPointsPrev.begin();it!=lidarPointsPrev.end();++it){
         if(abs(it->y)<=laneWidth/2.0){
-            minXPrev=minXPrev>it->x?it->x:minXPrev;
+            //minXPrev=minXPrev>it->x?it->x:minXPrev;
+            xPrevROI.push_back(it->x);
         }
     }
 
+    sort(xPrevROI.begin(),xPrevROI.end());
+    long medIndex=floor(xPrevROI.size()/2.0);
+    double medxPrev=xPrevROI.size()%2==0?(xPrevROI[medIndex-1]+xPrevROI[medIndex])/2.0:xPrevROI[medIndex];
+
     for(auto it=lidarPointsCurr.begin();it!=lidarPointsCurr.end();++it){
         if(abs(it->y)<=laneWidth/2.0){
-            minXCurr=minXCurr>it->x?it->x:minXCurr;
+            //minXCurr=minXCurr>it->x?it->x:minXCurr;
+            xCurrROI.push_back(it->x);
         }
     }
-    TTC=minXCurr*dT/(minXPrev-minXCurr);
+
+    sort(xCurrROI.begin(),xCurrROI.end());
+    medIndex=floor(xCurrROI.size()/2.0);
+    double medxCurr=xCurrROI.size()%2==0?(xCurrROI[medIndex-1]+xCurrROI[medIndex])/2.0:xCurrROI[medIndex];
+
+    //TTC=minXCurr*dT/(minXPrev-minXCurr);
+    TTC=medxCurr*dT/(medxPrev-medxCurr);
 }
 
 
